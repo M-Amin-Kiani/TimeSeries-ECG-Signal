@@ -1,0 +1,135 @@
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.utils import to_categorical
+
+# Load data
+train_data = pd.read_csv('mitbih_train.csv', header=None)
+test_data = pd.read_csv('mitbih_test.csv', header=None)
+
+# Separate features and labels
+X_train = train_data.iloc[:, :-1].values
+y_train = train_data.iloc[:, -1].values  # Labels are in the last column
+X_test = test_data.iloc[:, :-1].values
+y_test = test_data.iloc[:, -1].values
+
+# Check for invalid or missing labels
+def clean_labels(features, labels):
+    """Ensure all features and labels have matching lengths and valid data."""
+    valid_indices = ~np.isnan(labels)  # Remove NaN values
+    features = features[valid_indices]
+    labels = labels[valid_indices].astype(int)  # Convert to integers
+    return features, labels
+
+X_train, y_train = clean_labels(X_train, y_train)
+X_test, y_test = clean_labels(X_test, y_test)
+
+# Normalize data
+scaler = MinMaxScaler()
+X_train = scaler.fit_transform(X_train)
+X_test = scaler.transform(X_test)
+
+# One-hot encode labels for multi-class classification
+y_train = to_categorical(y_train, num_classes=5)
+y_test = to_categorical(y_test, num_classes=5)
+
+# Apply Fourier Transform (optional for feature extraction)
+def apply_fourier_transform(data):
+    return np.abs(np.fft.fft(data, axis=1))
+
+X_train = apply_fourier_transform(X_train)
+X_test = apply_fourier_transform(X_test)
+
+# Reshape for Transformer input
+X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
+X_test = X_test.reshape(X_test.shape[0], X_test.shape[1], 1)
+
+# Define Transformer Encoder Block
+def transformer_encoder(inputs, num_heads, ff_dim, dropout=0.1):
+    attention = tf.keras.layers.MultiHeadAttention(num_heads=num_heads, key_dim=inputs.shape[-1])(inputs, inputs)
+    attention = tf.keras.layers.Dropout(dropout)(attention)
+    attention = tf.keras.layers.LayerNormalization(epsilon=1e-6)(inputs + attention)
+
+    ff = tf.keras.layers.Dense(ff_dim, activation='relu')(attention)
+    ff = tf.keras.layers.Dense(inputs.shape[-1])(ff)
+    ff = tf.keras.layers.Dropout(dropout)(ff)
+    return tf.keras.layers.LayerNormalization(epsilon=1e-6)(attention + ff)
+
+# Build Transformer-based Model
+input_layer = tf.keras.layers.Input(shape=(X_train.shape[1], X_train.shape[2]))
+
+x = tf.keras.layers.Conv1D(filters=128, kernel_size=5, activation='relu')(input_layer)
+x = tf.keras.layers.BatchNormalization()(x)
+x = tf.keras.layers.MaxPooling1D(pool_size=2)(x)
+x = tf.keras.layers.Dropout(0.5)(x)
+
+x = transformer_encoder(x, num_heads=4, ff_dim=256)
+x = transformer_encoder(x, num_heads=4, ff_dim=256)
+x = transformer_encoder(x, num_heads=4, ff_dim=256)
+
+x = tf.keras.layers.GlobalAveragePooling1D()(x)
+x = tf.keras.layers.Dense(128, activation='relu')(x)
+x = tf.keras.layers.Dropout(0.5)(x)
+output_layer = tf.keras.layers.Dense(5, activation='softmax')(x)
+
+model_transformer = tf.keras.Model(inputs=input_layer, outputs=output_layer)
+
+# Compile model
+model_transformer.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.0005),
+    loss='categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+# Train model
+history_transformer = model_transformer.fit(
+    X_train, y_train,
+    epochs=50,
+    batch_size=64,
+    validation_data=(X_test, y_test),
+    callbacks=[
+        tf.keras.callbacks.EarlyStopping(patience=8, restore_best_weights=True),
+        tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=4, min_lr=1e-6)
+    ]
+)
+
+# Evaluate model
+loss_transformer, accuracy_transformer = model_transformer.evaluate(X_test, y_test)
+print(f'Test Accuracy with Transformer: {accuracy_transformer * 100:.2f}%')
+
+# Predictions and confusion matrix
+y_pred_transformer = model_transformer.predict(X_test)
+y_pred_classes = np.argmax(y_pred_transformer, axis=1)
+y_true_classes = np.argmax(y_test, axis=1)
+
+print("\nClassification Report (Transformer):")
+print(classification_report(y_true_classes, y_pred_classes))
+# Confusion matrix
+cm = confusion_matrix(y_true_classes, y_pred_classes)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=[0, 1, 2, 3, 4])
+disp.plot(cmap=plt.cm.Blues)
+plt.title("Confusion Matrix (Transformer)")
+plt.show()
+
+# Plot accuracy
+plt.figure(figsize=(12, 6))
+plt.plot(history_transformer.history['accuracy'], label='Training Accuracy')
+plt.plot(history_transformer.history['val_accuracy'], label='Validation Accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.title('Transformer Model Accuracy')
+plt.show()
+
+# Plot loss
+plt.figure(figsize=(12, 6))
+plt.plot(history_transformer.history['loss'], label='Training Loss')
+plt.plot(history_transformer.history['val_loss'], label='Validation Loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+plt.title('Transformer Model Loss')
+plt.show()
