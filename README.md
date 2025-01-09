@@ -1,6 +1,8 @@
 # TimeSeries-ECG-Signal
 
 ![image](https://github.com/user-attachments/assets/f7ed2ce8-cdb4-4776-ada7-11715755af6f)
+![image](https://github.com/user-attachments/assets/83d5b3a1-bc4a-4c8c-9e9a-1f2939533199)
+
 
 ![image](https://github.com/user-attachments/assets/1acb705c-41dd-4f08-bc47-95a4b90c705a)
 
